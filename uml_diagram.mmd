@@ -1,0 +1,81 @@
+classDiagram
+    %% Enums
+    class Priority {
+        <<enumeration>>
+        HIGH
+        MEDIUM
+        LOW
+    }
+
+    class Frequency {
+        <<enumeration>>
+        DAILY
+        WEEKLY
+        MONTHLY
+        ONE_TIME
+    }
+
+    %% Task Class
+    class Task {
+        +int id
+        +str description
+        +int duration_minutes
+        +Priority priority
+        +Optional~datetime~ due_time
+        +Frequency frequency
+        +bool is_completed
+        +Optional~str~ pet_name
+
+        +mark_complete() void
+        +get_end_time() Optional~datetime~
+        +overlaps_with(Task other_task) bool
+    }
+
+    %% Pet Class
+    class Pet {
+        +str name
+        +str species
+        +int age
+        +List~Task~ tasks
+
+        +add_task(Task task) void
+        +get_tasks() List~Task~
+        +get_pending_tasks() List~Task~
+    }
+
+    %% Owner Class
+    class Owner {
+        +str name
+        +List~Pet~ pets
+
+        +add_pet(Pet pet) void
+        +get_all_tasks() List~Tuple[str, Task]~
+    }
+
+    %% Scheduler Class
+    class Scheduler {
+        +Optional~Owner~ owner
+        -int _next_task_id
+
+        +set_owner(Owner owner) void
+        +generate_task_id() int
+        +get_pet_by_name(str name) Optional~Pet~
+        +get_all_tasks() List~Tuple[str, Task]~
+        +sort_tasks_by_time(List~Task~ tasks) List~Task~
+        +filter_tasks(Optional~str~ pet_name, Optional~bool~ completed) List~Task~
+        +complete_task(Task task, str pet_name) bool
+        +check_conflicts(Task new_task) bool
+        +detect_all_conflicts() List~str~
+        +generate_daily_schedule(int available_minutes, Optional~datetime~ target_date) List~Tuple[str, Task]~
+        +generate_recurring_tasks(datetime start_date, datetime end_date) int
+    }
+
+    %% Relationships
+    Owner "1" *-- "0..*" Pet : owns
+    Pet "1" *-- "0..*" Task : has
+    Scheduler "1" o-- "0..1" Owner : manages
+    Task ..> Priority : uses
+    Task ..> Frequency : uses
+    Task ..> Task : compares with
+    Scheduler ..> Task : manipulates
+    Scheduler ..> Pet : queries

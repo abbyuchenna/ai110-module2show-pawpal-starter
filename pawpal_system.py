@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
+import json
+import os
 
 
 class Priority(Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
 
 
 class Frequency(Enum):
@@ -51,6 +53,42 @@ class Task:
 
         return self.due_time < other_end and other_task.due_time < self_end
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert Task to dictionary for JSON serialization."""
+        return {
+            "id": self.id,
+            "description": self.description,
+            "duration_minutes": self.duration_minutes,
+            "priority": self.priority.value,
+            "due_time": self.due_time.isoformat() if self.due_time else None,
+            "frequency": self.frequency.value,
+            "is_completed": self.is_completed,
+            "pet_name": self.pet_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Task":
+        """Create Task from dictionary loaded from JSON."""
+        # Handle backward compatibility for lowercase priority values
+        priority_str = data["priority"]
+        if priority_str == "high":
+            priority_str = "High"
+        elif priority_str == "medium":
+            priority_str = "Medium"
+        elif priority_str == "low":
+            priority_str = "Low"
+
+        return cls(
+            id=data["id"],
+            description=data["description"],
+            duration_minutes=data["duration_minutes"],
+            priority=Priority(priority_str),
+            due_time=datetime.fromisoformat(data["due_time"]) if data["due_time"] else None,
+            frequency=Frequency(data["frequency"]),
+            is_completed=data.get("is_completed", False),
+            pet_name=data.get("pet_name"),
+        )
+
 
 @dataclass
 class Pet:
@@ -77,6 +115,27 @@ class Pet:
     def get_pending_tasks(self) -> List[Task]:
         return [task for task in self.tasks if not task.is_completed]
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert Pet to dictionary for JSON serialization."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "age": self.age,
+            "tasks": [task.to_dict() for task in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Pet":
+        """Create Pet from dictionary loaded from JSON."""
+        pet = cls(
+            name=data["name"],
+            species=data["species"],
+            age=data["age"],
+        )
+        # Reconstruct tasks
+        pet.tasks = [Task.from_dict(task_data) for task_data in data.get("tasks", [])]
+        return pet
+
 
 class Owner:
     """Represents a pet owner managing multiple pets."""
@@ -95,6 +154,46 @@ class Owner:
                 all_tasks.append((pet.name, task))
         return all_tasks
 
+    def save_to_json(self, filepath: str = "data.json") -> None:
+        """
+        Save owner and all pet data to JSON file.
+
+        Args:
+            filepath: Path to JSON file (default: data.json)
+        """
+        data = {
+            "name": self.name,
+            "pets": [pet.to_dict() for pet in self.pets],
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, filepath: str = "data.json") -> "Owner":
+        """
+        Load owner and all pet data from JSON file.
+
+        Args:
+            filepath: Path to JSON file (default: data.json)
+
+        Returns:
+            Owner object with all pets and tasks restored.
+            If file doesn't exist, returns empty Owner with default name.
+        """
+        if not os.path.exists(filepath):
+            return cls("Pet Owner")
+
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+
+            owner = cls(data.get("name", "Pet Owner"))
+            owner.pets = [Pet.from_dict(pet_data) for pet_data in data.get("pets", [])]
+            return owner
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # If file is corrupted or invalid, return empty owner
+            return cls("Pet Owner")
+
 
 class Scheduler:
     def __init__(self):
@@ -103,6 +202,19 @@ class Scheduler:
 
     def set_owner(self, owner: Owner) -> None:
         self.owner = owner
+        self._sync_task_id_counter()
+
+    def _sync_task_id_counter(self) -> None:
+        """Sync task ID counter with existing tasks to avoid ID collisions."""
+        if not self.owner:
+            return
+
+        max_id = 0
+        for pet in self.owner.pets:
+            for task in pet.tasks:
+                max_id = max(max_id, task.id)
+
+        self._next_task_id = max_id + 1
 
     def generate_task_id(self) -> int:
         task_id = self._next_task_id
@@ -132,6 +244,23 @@ class Scheduler:
         return sorted(
             tasks,
             key=lambda task: (task.due_time is None, task.due_time)
+        )
+
+    def sort_by_priority_and_time(self, tasks: List[Task]) -> List[Task]:
+        """
+        Sort tasks by priority first (High → Medium → Low), then by due_time.
+        Tasks with None due_time are placed at the end within each priority level.
+
+        Time complexity: O(n log n) where n = number of tasks
+        """
+        priority_order = {"High": 0, "Medium": 1, "Low": 2}
+        return sorted(
+            tasks,
+            key=lambda task: (
+                priority_order[task.priority.value],
+                task.due_time is None,
+                task.due_time
+            )
         )
 
     def filter_tasks(
